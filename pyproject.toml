@@ -1,0 +1,32 @@
+[build-system]
+requires = [
+  "setuptools",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cli_autotuner"
+version = "0.0.1"
+requires-python = ">=3.8"
+dependencies = [
+	"click",
+	"optuna"
+]
+
+[project.optional-dependencies]
+test = [
+	"pytest",
+	"mypy",
+	"pep8",
+	"coverage",
+	"build",
+	]
+
+[tool.pytest.ini_options]
+testpaths = [
+    "tests"
+    ]
+
+
+[project.scripts]
+cli_autotuner = "cli_autotuner.main:cli"

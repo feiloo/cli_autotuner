@@ -10,7 +10,8 @@ version = "0.0.1"
 requires-python = ">=3.8"
 dependencies = [
 	"click",
-	"optuna"
+	"optuna",
+	"psutil"
 ]
 
 [project.optional-dependencies]

@@ -11,6 +11,8 @@ import psutil
 import json
 import os
 
+import click
+
 
 script_templ = r'''#!/bin/bash
 set -euo pipefail
@@ -209,7 +211,7 @@ def gen_param_cmd(tmpath, param):
     
     
 
-def prepare_trial(progdir, workdir, hparams, trial_number):
+def prepare_trial(progdir, workdir, hparams, trial_number, setup_cmd):
     # trial path
     tpath = Path(workdir) / str(trial_number)
     if tpath.exists():
@@ -250,15 +252,19 @@ def prepare_trial(progdir, workdir, hparams, trial_number):
     proc = subprocess.run(cmd, text=True, shell=True, capture_output=True, timeout=60)
     proc.check_returncode()
 
+    if setup_cmd is not None:
+        proc = subprocess.run(setup_cmd, text=True, shell=True, capture_output=True, timeout=60, cwd=tmpath)
+        proc.check_returncode()
+
     return outpath, tmpath
 
 
-def objective_fn(trial,spec, cmd):
+def objective_fn(trial,spec, cmd, setup_cmd):
     workdir = './workdir'
     progdir = './progdir'
 
     hparams = get_params(trial, spec)
-    outpath, tmpath = prepare_trial(progdir, workdir, hparams, trial.number) 
+    outpath, tmpath = prepare_trial(progdir, workdir, hparams, trial.number, setup_cmd) 
     try:
         tim = run_trial(cmd, outpath, tmpath, trial.number)
     except KeyboardInterrupt:
@@ -270,60 +276,73 @@ def objective_fn(trial,spec, cmd):
 
     return tim
 
-workdir = './workdir'
-progdir = './progdir'
+def tune_program(progdir, workdir, specfile, cmd, setup_cmd):
+    #workdir = './workdir'
+    #progdir = './progdir'
+
+    '''
+    if Path(workdir).exists():
+        shutil.rmtree(str(Path(workdir)))
+    '''
+
+    Path(workdir).mkdir()
+
+    # Add stream handler of stdout to show the messages
+    optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
+    study_name = "study_name"  # Unique identifier of the study.
+    db_path = str(Path(workdir) / study_name)
+    storage_name = f"sqlite:///{db_path}.db"
+
+    with Path(specfile).open('r') as f:
+        spec = json.loads(f.read())
+
+    #spec = test_spec
+    search_space = get_search_space(spec)
+    print(search_space)
+    sampler = optuna.samplers.GridSampler(search_space=search_space)
+    #sampler=optuna.samplers.BruteForceSampler(), 
+
+    study = optuna.create_study(
+        study_name=spec['study_name'], 
+        storage=storage_name, 
+        sampler=sampler,
+        load_if_exists=True, 
+        direction='minimize')
+
+    #study.optimize(objective, n_trials=30)
+
+    def objective(trial):
+        return objective_fn(trial, spec, cmd, setup_cmd)
+
+    study.optimize(objective)
+    df = study.trials_dataframe()
+    print(df)
+
+    # optimize
+    # optimize --continue
+
+    # workdir/trial
+
+    # workdir/trial/score.txt
+
+    # dashboard hint:
+    # optuna-dashboard sqlite:///workdir/study_name.db --port 8080 
+
+
+#@click.group()
+@click.command()
+@click.argument('workdir', type=click.Path(exists=False, dir_okay=True, path_type=Path))
+@click.argument('progdir', type=click.Path(exists=True, dir_okay=True, path_type=Path))
+@click.argument('specfile', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.argument('cmd', type=str)
+#@click.option('--dev', is_flag=True, default=False)
+@click.option('--setup_cmd', default=None, type=str)
+#@click.pass_context
+def cli(workdir, progdir, specfile, cmd, setup_cmd):
+    tune_program(progdir, workdir, specfile, cmd, setup_cmd)
+         
 
 '''
-if Path(workdir).exists():
-    shutil.rmtree(str(Path(workdir)))
-'''
-
-Path(workdir).mkdir()
-
-# Add stream handler of stdout to show the messages
-optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
-study_name = "study_name"  # Unique identifier of the study.
-db_path = str(Path(workdir) / study_name)
-storage_name = f"sqlite:///{db_path}.db"
-
-with open('test_spec.json', 'r') as f:
-    spec = json.loads(f.read())
-
-#spec = test_spec
-search_space = get_search_space(spec)
-print(search_space)
-sampler = optuna.samplers.GridSampler(search_space=search_space)
-#sampler=optuna.samplers.BruteForceSampler(), 
-
-study = optuna.create_study(
-    study_name=spec['study_name'], 
-    storage=storage_name, 
-    sampler=sampler,
-    load_if_exists=True, 
-    direction='minimize')
-
-#study.optimize(objective, n_trials=30)
-cmd = './hello.sh'
-
-def objective(trial):
-    return objective_fn(trial, spec, cmd)
-
-study.optimize(objective)
-df = study.trials_dataframe()
-print(df)
-
-# optimize
-# optimize --continue
-
-# workdir/trial
-
-# workdir/trial/score.txt
-
-workdir = './workdir'
-progdir = './progdir'
-
-def cli():
-    pass
-
 if __name__ == '__main__':
     cli()
+'''

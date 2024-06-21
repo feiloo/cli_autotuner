@@ -1,0 +1,19 @@
+{
+        "study_name":"study1",
+        "sampler":"s1",
+        "pruner":"p1",
+        "params":[
+            {"param_name":"param1",
+                "param_type": "int",
+                "regex":"param1",
+                "files":[],
+                "args":{"low":1, "high":2,"step":1}
+                },
+            {"param_name":"param2",
+                "param_type": "categorical",
+                "regex":"param2",
+                "files":[],
+                "args":["cat1", "cat2"]
+                }
+            ]
+        }

@@ -9,6 +9,7 @@ import optuna
 import signal
 import psutil
 import json
+import os
 
 
 script_templ = r'''#!/bin/bash
@@ -47,18 +48,9 @@ def get_metrics(psproc):
     metrics = join_dicts(res)
     return metrics
 
+
+
 def run_trial(cmd, outpath, tmpath, trial_number):
-    '''
-    podman run --rm -ti \
-            --mount type=bind,src=wgs_bam/,dst=/root/wgs_bam \
-            --mount type=bind,src=wgs_bam_dedup_test/,dst=/root/wgs_bam_dedup_test \
-            quay.io/biocontainers/gatk4:4.4.0.0--py36hdfd78af_0 \
-            /bin/bash -c 'mkdir -p container_trial_path_var && cd container_trial_path_var && chmod u+x script.sh && ./script.sh'
-    '''
-
-    #cmd = '''mkdir -p container_trial_path_var && cd container_trial_path_var && chmod u+x script.sh && ./script.sh'''
-
-    opath = 'wgs_bam_dedup_test/' + str(trial_number)
     outpath = Path(outpath)
 
     st = time()
@@ -70,7 +62,7 @@ def run_trial(cmd, outpath, tmpath, trial_number):
 
 
     with (outpath / 'stdout.txt').open('r+') as sdo, (outpath / 'stderr.txt').open('r+') as sde, (outpath / 'res_log.txt').open('r+') as log:
-        proc = subprocess.Popen(['/bin/bash', '-c', cmd], text=True, stderr=sde, stdout=sdo)
+        proc = subprocess.Popen(['/bin/bash', '-c', cmd], text=True, stderr=sde, stdout=sdo, cwd=str(tmpath))
         pid = proc.pid
         psup = psutil.Process(pid=pid)
 
@@ -193,15 +185,27 @@ def get_search_space(spec):
 
     return search_space
 
-def gen_param_cmd(progdir, param):
+def list_files(tmpath):
+    fi = []
+    for dirpath, dirnames, filenames in os.walk(str(tmpath)):
+        for f in filenames:
+            pf = (Path(dirpath) / f)
+            if pf.is_file():
+                relpath = Path('tmp') / str(pf).removeprefix(str(tmpath)+'/')
+                fi.append(str(relpath))
+    return fi
+
+def gen_param_cmd(tmpath, param):
     param_val = param[0]
     regex = param[1]
     files = param[2]
 
     if files == []:
-        files = list(Path(progdir).iterdir())
+        files = list_files(tmpath)
 
-    print(f'sed -i s/{regex}/{param_val} {files[0]}')
+    files_s = ' '.join(files)
+    cmd = f"sed -i -e 's/{regex}/{param_val}/g' {files_s}"
+    return cmd
     
     
 
@@ -230,14 +234,21 @@ def prepare_trial(progdir, workdir, hparams, trial_number):
             shutil.rmtree(str(sp / 'out'))
     '''
 
+    shutil.copytree(progdir, tmpath, dirs_exist_ok=True)
+    cmds = []
+    for param_name, trip in hparams.items():
+        cmds.append(gen_param_cmd(tmpath, trip))
+
     global script_templ
     script = script_templ
+    script += '\n'.join(cmds)
+
     with (tpath/'script.sh').open('w') as f:
             f.write(script)
 
-    shutil.copytree(progdir, tmpath, dirs_exist_ok=True)
-    for param_name, trip in hparams.items():
-        gen_param_cmd(progdir, trip)
+    cmd = f'cd {tpath} && chmod u+x ./script.sh && ./script.sh'
+    proc = subprocess.run(cmd, text=True, shell=True, capture_output=True, timeout=60)
+    proc.check_returncode()
 
     return outpath, tmpath
 
@@ -259,33 +270,26 @@ def objective_fn(trial,spec, cmd):
 
     return tim
 
+workdir = './workdir'
+progdir = './progdir'
+
+'''
+if Path(workdir).exists():
+    shutil.rmtree(str(Path(workdir)))
+'''
+
+Path(workdir).mkdir()
 
 # Add stream handler of stdout to show the messages
 optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
 study_name = "study_name"  # Unique identifier of the study.
-storage_name = f"sqlite:///{study_name}.db"
+db_path = str(Path(workdir) / study_name)
+storage_name = f"sqlite:///{db_path}.db"
 
-test_spec = {
-        'study_name':'study1',
-        'sampler':'s1',
-        'pruner':'p1',
-        'params':[
-            {'param_name':'param1',
-                'param_type': 'int',
-                'regex':'r',
-                'files':[],
-                'args':{'low':1, 'high':2,'step':1}
-                },
-            {'param_name':'param2',
-                'param_type': 'categorical',
-                'regex':'r',
-                'files':[],
-                'args':['cat1', 'cat2'],
-                }
-            ]
-        }
+with open('test_spec.json', 'r') as f:
+    spec = json.loads(f.read())
 
-spec = test_spec
+#spec = test_spec
 search_space = get_search_space(spec)
 print(search_space)
 sampler = optuna.samplers.GridSampler(search_space=search_space)
@@ -299,7 +303,7 @@ study = optuna.create_study(
     direction='minimize')
 
 #study.optimize(objective, n_trials=30)
-cmd = 'echo hello'
+cmd = './hello.sh'
 
 def objective(trial):
     return objective_fn(trial, spec, cmd)

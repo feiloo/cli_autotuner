@@ -7,13 +7,19 @@
                 "param_type": "int",
                 "regex":"param1",
                 "files":[],
-                "args":{"low":1, "high":2,"step":1}
+                "args":{"low":1, "high":8,"step":1}
+                },
+            {"param_name":"comprlevel",
+                "param_type": "int",
+                "regex":"comprlevel",
+                "files":[],
+                "args":{"low":1, "high":9,"step":2}
                 },
             {"param_name":"param2",
                 "param_type": "categorical",
                 "regex":"param2",
                 "files":[],
-                "args":["cat1", "cat2"]
+                "args":["cat1"]
                 }
             ]
         }

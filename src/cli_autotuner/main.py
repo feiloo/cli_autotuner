@@ -19,6 +19,7 @@ set -euo pipefail
 '''
 
 def tup_to_dic(x):
+    ''' tuple to dictionary '''
     return dict(zip(x._fields, x))
 
 def join_dicts(dicts):
@@ -52,18 +53,20 @@ def get_metrics(psproc):
 
 
 
-def run_trial(cmd, outpath, tmpath, trial_number):
+def run_trial(cmd, outpath, tmpath, trial_number, trial, timeout):
     outpath = Path(outpath)
 
     st = time()
-    timeout = 60*60*30 # 30h
     #proc = subprocess.run(cmd, text=True, shell=True, capture_output=True, timeout=timeout)
     (outpath / 'stdout.txt').touch()
     (outpath / 'stderr.txt').touch()
     (outpath / 'res_log.txt').touch()
 
 
-    with (outpath / 'stdout.txt').open('r+') as sdo, (outpath / 'stderr.txt').open('r+') as sde, (outpath / 'res_log.txt').open('r+') as log:
+    with (outpath / 'stdout.txt').open('r+') as sdo, \
+        (outpath / 'stderr.txt').open('r+') as sde, \
+        (outpath / 'res_log.txt').open('r+') as log:
+
         proc = subprocess.Popen(['/bin/bash', '-c', cmd], text=True, stderr=sde, stdout=sdo, cwd=str(tmpath))
         pid = proc.pid
         psup = psutil.Process(pid=pid)
@@ -110,6 +113,7 @@ def run_trial(cmd, outpath, tmpath, trial_number):
                 proc.send_signal(signal.SIGINT)
                 proc.wait()
                 proc.kill()
+                trial.study.stop()
             except subprocess.TimeoutExpired:
                 pass
             except Exception as e:
@@ -143,7 +147,6 @@ name,int,lbalb,[f1,f2,f3],[
 def make_param(trial, p_spec: dict):
     pt = p_spec['param_type']
     pn = p_spec['param_name']
-    print(p_spec)
     regex = p_spec['regex']
     assert isinstance(pn, str)
 
@@ -227,15 +230,6 @@ def prepare_trial(progdir, workdir, hparams, trial_number, setup_cmd):
     outpath.mkdir()
     tmpath.mkdir()
 
-    '''
-    # cleanup 
-    for sp in stp.iterdir():
-        if (sp / 'tmp').exists():
-            shutil.rmtree(str(sp / 'tmp'))
-        if (sp / 'out').exists():
-            shutil.rmtree(str(sp / 'out'))
-    '''
-
     shutil.copytree(progdir, tmpath, dirs_exist_ok=True)
     cmds = []
     for param_name, trip in hparams.items():
@@ -259,31 +253,34 @@ def prepare_trial(progdir, workdir, hparams, trial_number, setup_cmd):
     return outpath, tmpath
 
 
-def objective_fn(trial,spec, cmd, setup_cmd):
+def objective_fn(trial, spec, cmd, setup_cmd, timeout):
     workdir = './workdir'
     progdir = './progdir'
 
+    print(f'starting trial: {trial.number}\n')
     hparams = get_params(trial, spec)
+    print(f'''running trial with params: 
+          {hparams}
+          ''')
     outpath, tmpath = prepare_trial(progdir, workdir, hparams, trial.number, setup_cmd) 
     try:
-        tim = run_trial(cmd, outpath, tmpath, trial.number)
+        tim = run_trial(cmd, outpath, tmpath, trial.number, trial, timeout)
+        # write score to workdir, for ease-of-use
+        with (Path(outpath) / 'score.txt').open('w') as f:
+            f.write(str(tim))
+        return tim
     except KeyboardInterrupt:
         trial.study.stop()
         raise KeyboardInterrupt()
-    except Exception as e:
-        print(e)
-        tim = 99999999
+    #except Exception as e:
+        #print(e)
+        #raise e
 
-    return tim
 
-def tune_program(progdir, workdir, specfile, cmd, setup_cmd):
-    #workdir = './workdir'
-    #progdir = './progdir'
 
-    '''
-    if Path(workdir).exists():
+def tune_program(progdir, workdir, specfile, cmd, setup_cmd, n_trials, overwrite, timeout):
+    if overwrite and Path(workdir).exists():
         shutil.rmtree(str(Path(workdir)))
-    '''
 
     Path(workdir).mkdir()
 
@@ -293,14 +290,31 @@ def tune_program(progdir, workdir, specfile, cmd, setup_cmd):
     db_path = str(Path(workdir) / study_name)
     storage_name = f"sqlite:///{db_path}.db"
 
+    print(f'''tuning study can be viewed with optuna-dashboard: 
+    optuna-dashboard {storage_name}
+    ''')
+
     with Path(specfile).open('r') as f:
         spec = json.loads(f.read())
 
-    #spec = test_spec
     search_space = get_search_space(spec)
-    print(search_space)
-    sampler = optuna.samplers.GridSampler(search_space=search_space)
-    #sampler=optuna.samplers.BruteForceSampler(), 
+    print(f'''tuning on search space:
+    {search_space}''')
+
+    sampler_name = spec['sampler']
+    pruner_name = spec['pruner']
+    if pruner_name is not None:
+        raise NotImplementedError('pruners arent implemented yet')
+
+    seed = spec['seed']
+
+    # for guidance on what sampler/pruner, see: https://optuna.readthedocs.io/en/stable/reference/samplers/index.html
+    if sampler_name == 'random':
+        sampler = optuna.samplers.RandomSampler(seed)
+    elif sampler_name == 'grid':
+        sampler = optuna.samplers.GridSampler(search_space=search_space, seed=seed)
+    else: 
+        raise NotImplementedError("sampler is not implemented")
 
     study = optuna.create_study(
         study_name=spec['study_name'], 
@@ -309,24 +323,15 @@ def tune_program(progdir, workdir, specfile, cmd, setup_cmd):
         load_if_exists=True, 
         direction='minimize')
 
-    #study.optimize(objective, n_trials=30)
-
     def objective(trial):
-        return objective_fn(trial, spec, cmd, setup_cmd)
+        return objective_fn(trial, spec, cmd, setup_cmd, timeout)
 
-    study.optimize(objective)
+    study.optimize(objective,n_trials=n_trials)
     df = study.trials_dataframe()
-    print(df)
+    print(f'''results-table:
+    {df}
+    ''')
 
-    # optimize
-    # optimize --continue
-
-    # workdir/trial
-
-    # workdir/trial/score.txt
-
-    # dashboard hint:
-    # optuna-dashboard sqlite:///workdir/study_name.db --port 8080 
 
 
 #@click.group()
@@ -336,10 +341,13 @@ def tune_program(progdir, workdir, specfile, cmd, setup_cmd):
 @click.argument('specfile', type=click.Path(exists=True, dir_okay=False, path_type=Path))
 @click.argument('cmd', type=str)
 #@click.option('--dev', is_flag=True, default=False)
-@click.option('--setup_cmd', default=None, type=str)
+@click.option('--setup_cmd', default=None, type=str, help='run a setup command before each trial')
+@click.option('--n_trials', default=16, type=int, help='default=16, number of parameter configuration to try')
+@click.option('--timeout', default=30*60*60, type=int, help='default=108000 (30 hours), time after which a trial will be considered failed')
+@click.option('--overwrite', is_flag=True, help='overwrite existing workdir')
 #@click.pass_context
-def cli(workdir, progdir, specfile, cmd, setup_cmd):
-    tune_program(progdir, workdir, specfile, cmd, setup_cmd)
+def cli(workdir, progdir, specfile, cmd, setup_cmd,n_trials, timeout, overwrite):
+    tune_program(progdir, workdir, specfile, cmd, setup_cmd,n_trials, timeout, overwrite)
          
 
 '''

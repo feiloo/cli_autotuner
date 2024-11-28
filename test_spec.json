@@ -1,7 +1,8 @@
 {
         "study_name":"study1",
-        "sampler":"s1",
-        "pruner":"p1",
+        "sampler":"random",
+        "pruner":null,
+        "seed":0,
         "params":[
             {"param_name":"param1",
                 "param_type": "int",

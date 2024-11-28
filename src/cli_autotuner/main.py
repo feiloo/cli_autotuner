@@ -285,6 +285,9 @@ def tune_program(progdir, workdir, specfile, cmd, setup_cmd, n_trials, overwrite
     Path(workdir).mkdir()
 
     # Add stream handler of stdout to show the messages
+    lg = optuna.logging.get_logger("optuna")
+    # remove default logging handler
+    lg.handlers = []
     optuna.logging.get_logger("optuna").addHandler(logging.StreamHandler(sys.stdout))
     study_name = "study_name"  # Unique identifier of the study.
     db_path = str(Path(workdir) / study_name)
@@ -332,6 +335,11 @@ def tune_program(progdir, workdir, specfile, cmd, setup_cmd, n_trials, overwrite
     df = study.trials_dataframe()
     print(f'''results-table:
     {df}
+    ''')
+    print(f'''best params:
+    {study.best_params}
+    achieved a score of:
+    {study.best_value}
     ''')
 
 

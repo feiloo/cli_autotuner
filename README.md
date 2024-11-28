@@ -4,6 +4,14 @@ this is a simple tool for optimizing linux programs
 
 is uses bash, sed, python, optuna
 
+### install
+
+```
+git clone https://github.com/feiloo/cli_autotuner.git
+cd cli_autotuner
+pip install .
+```
+
 ### how it works
 
 for now, this tool minimizes the program execution time.

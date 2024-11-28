@@ -313,6 +313,8 @@ def tune_program(progdir, workdir, specfile, cmd, setup_cmd, n_trials, overwrite
         sampler = optuna.samplers.RandomSampler(seed)
     elif sampler_name == 'grid':
         sampler = optuna.samplers.GridSampler(search_space=search_space, seed=seed)
+    elif sampler_name == 'tpe':
+        sampler = optuna.samplers.TPESamper(seed=seed)
     else: 
         raise NotImplementedError("sampler is not implemented")
 

@@ -116,13 +116,13 @@ def run_trial(cmd, outpath, tmpath, trial_number, trial, timeout):
                 trial.study.stop()
             except subprocess.TimeoutExpired:
                 pass
+            # catch exceptions on psutil subprocess analysis
             except Exception as e:
                 print(e)
 
-        proc.kill()
-    #proc.wait()
+        if proc.returncode != 0:
+            raise RuntimeError("None zero exit-code")
 
-    #proc.check_returncode()
     return time() - st
 
 
@@ -331,7 +331,7 @@ def tune_program(progdir, workdir, specfile, cmd, setup_cmd, n_trials, overwrite
     def objective(trial):
         return objective_fn(trial, spec, cmd, setup_cmd, timeout)
 
-    study.optimize(objective,n_trials=n_trials)
+    study.optimize(objective,n_trials=n_trials, catch=[Exception])
     df = study.trials_dataframe()
     print(f'''results-table:
     {df}
